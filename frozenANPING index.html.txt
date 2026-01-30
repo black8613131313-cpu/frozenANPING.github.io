@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>美味冷凍食品 - 線上點餐</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Marked -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- QRCode Generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        window.firebaseModules = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp };
+        window.dispatchEvent(new Event('firebase-ready'));
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+        const apiKey = ""; 
+
+        // --- 1. CONFIGURATION (Embedded User Config) ---
+        // 這是您的專屬設定，系統會優先使用這組設定進行連線
+        const USER_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyB6Vm4OiYls2SryC-lsJrPcqC1Su2lIBpk",
+            authDomain: "forzenanping.firebaseapp.com",
+            projectId: "forzenanping",
+            storageBucket: "forzenanping.firebasestorage.app",
+            messagingSenderId: "211802745822",
+            appId: "1:211802745822:web:45897452c12aae3d538b4f",
+            measurementId: "G-1YRV4E44LK"
+        };
+        const USER_APP_ID = "forzenanping"; 
+
+        // --- 2. ICONS ---
+        const IconBase = ({ children, size = 24, className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+        );
+        const Icons = {
+            ShoppingCart: (p) => <IconBase {...p}><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></IconBase>,
+            Package: (p) => <IconBase {...p}><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></IconBase>,
+            CheckCircle: (p) => <IconBase {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconBase>,
+            ClipboardList: (p) => <IconBase {...p}><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></IconBase>,
+            Lock: (p) => <IconBase {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></IconBase>,
+            Settings: (p) => <IconBase {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></IconBase>,
+            FileSpreadsheet: (p) => <IconBase {...p}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/></IconBase>,
+            LogOut: (p) => <IconBase {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></IconBase>,
+            Plus: (p) => <IconBase {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></IconBase>,
+            Minus: (p) => <IconBase {...p}><line x1="5" y1="12" x2="19" y2="12"/></IconBase>,
+            X: (p) => <IconBase {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></IconBase>,
+            UserPlus: (p) => <IconBase {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></IconBase>,
+            MapPin: (p) => <IconBase {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></IconBase>,
+            Store: (p) => <IconBase {...p}><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/></IconBase>,
+            Tag: (p) => <IconBase {...p}><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><path d="M7 7h.01"/></IconBase>,
+            Edit: (p) => <IconBase {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></IconBase>,
+            TrendingUp: (p) => <IconBase {...p}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></IconBase>,
+            Archive: (p) => <IconBase {...p}><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></IconBase>,
+            Clock: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></IconBase>,
+            MessageSquare: (p) => <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></IconBase>,
+            Sparkles: (p) => <IconBase {...p}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M2 7h4"/><path d="M2 11h4"/></IconBase>,
+            Cloud: (p) => <IconBase {...p}><path d="M17.5 19c0-1.7-1.3-3-3-3h-1.1c-.1-2.9-2.4-5.3-5.3-5.3-2.6 0-4.8 1.9-5.2 4.4C1.1 15.6 0 17 0 18.5c0 2.5 2 4.5 4.5 4.5h13c2.5 0 4.5-2 4.5-4.5s-2-4.5-4.5-4.5z"/></IconBase>,
+            CloudOff: (p) => <IconBase {...p}><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 7h1.8a3 3 0 0 1 0 6H5a3 3 0 0 1 0-6"/><line x1="1" y1="1" x2="23" y2="23"/></IconBase>,
+            Palette: (p) => <IconBase {...p}><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></IconBase>,
+            ArrowUp: (p) => <IconBase {...p}><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></IconBase>,
+            ArrowDown: (p) => <IconBase {...p}><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></IconBase>,
+            Trash2: (p) => <IconBase {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconBase>,
+            Link: (p) => <IconBase {...p}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></IconBase>,
+            Share2: (p) => <IconBase {...p}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></IconBase>,
+            Download: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></IconBase>,
+            Globe: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></IconBase>,
+            AlertTriangle: (p) => <IconBase {...p}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></IconBase>
+        };
+
+        const { ShoppingCart, Package, CheckCircle, ClipboardList, Lock, Settings, FileSpreadsheet, LogOut, Plus, Minus, X, UserPlus, MapPin, Store, Tag, Edit, TrendingUp, Archive, Clock, MessageSquare, Sparkles, Cloud, CloudOff, Palette, ArrowUp, ArrowDown, Trash2, Link, Share2, Download, Globe, AlertTriangle } = Icons;
+
+        // Constants
+        const DEFAULT_PRODUCTS = [{ id: 'p1', name: '經典排骨酥', price: 250, unit: '包' }, { id: 'p2', name: '秘製五花燒肉', price: 300, unit: '條' }, { id: 'p3', name: '古早味滷肉燥', price: 150, unit: '罐' }, { id: 'p4', name: '蒜蓉辣椒醬', price: 180, unit: '瓶' }];
+        const DEFAULT_SITE_SETTINGS = { title: '美味冷凍食品訂購單', subtitle: '新鮮食材，簡單加熱即可享用', theme: 'orange', align: 'center' };
+        const THEME_COLORS = { orange: { bg: 'bg-orange-500', hover: 'hover:bg-orange-600', text: 'text-orange-600', ring: 'focus:ring-orange-500', border: 'hover:border-orange-500', light: 'bg-orange-100', textDark: 'text-orange-700' }, blue: { bg: 'bg-blue-600', hover: 'hover:bg-blue-700', text: 'text-blue-600', ring: 'focus:ring-blue-500', border: 'hover:border-blue-500', light: 'bg-blue-100', textDark: 'text-blue-700' }, green: { bg: 'bg-green-600', hover: 'hover:bg-green-700', text: 'text-green-600', ring: 'focus:ring-green-500', border: 'hover:border-green-500', light: 'bg-green-100', textDark: 'text-green-700' }, red: { bg: 'bg-red-600', hover: 'hover:bg-red-700', text: 'text-red-600', ring: 'focus:ring-red-500', border: 'hover:border-red-500', light: 'bg-red-100', textDark: 'text-red-700' }, purple: { bg: 'bg-purple-600', hover: 'hover:bg-purple-700', text: 'text-purple-600', ring: 'focus:ring-purple-500', border: 'hover:border-purple-500', light: 'bg-purple-100', textDark: 'text-purple-700' } };
+        const STATUS_OPTIONS = [{ value: 'unpaid', label: '未付款', color: 'bg-red-100 text-red-800' }, { value: 'checking', label: '款項未確認', color: 'bg-yellow-100 text-yellow-800' }, { value: 'pending', label: '待出貨', color: 'bg-blue-100 text-blue-800' }, { value: 'shipped', label: '已出貨', color: 'bg-green-100 text-green-800' }];
+        const SOURCE_OPTIONS = [{ value: 'web', label: '網站下單' }, { value: 'line', label: 'Line' }, { value: 'fb', label: 'Facebook' }, { value: 'phone', label: '電話訂購' }, { value: 'walkin', label: '現場購買' }, { value: 'other', label: '其他' }];
+
+        // --- TrendChart Component ---
+        const TrendChart = ({ orders }) => {
+            const canvasRef = useRef(null);
+            const chartInstance = useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current || !window.Chart) return;
+                const monthlyData = {};
+                orders.forEach(order => {
+                    if (!order.createdAt) return;
+                    const month = order.createdAt.substring(0, 7);
+                    const standardMonth = month.replace('-', '/');
+                    monthlyData[standardMonth] = (monthlyData[standardMonth] || 0) + parseInt(order.total);
+                });
+                const labels = Object.keys(monthlyData).sort();
+                const data = labels.map(label => monthlyData[label]);
+
+                if (chartInstance.current) chartInstance.current.destroy();
+
+                chartInstance.current = new Chart(canvasRef.current, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: '月銷售額 (TWD)',
+                            data: data,
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderColor: 'rgb(59, 130, 246)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+                });
+
+                return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+            }, [orders]);
+
+            return <canvas ref={canvasRef} />;
+        };
+
+        const App = () => {
+            // States
+            const [orders, setOrders] = useState([]);
+            const [products, setProducts] = useState(DEFAULT_PRODUCTS);
+            const [siteSettings, setSiteSettings] = useState(DEFAULT_SITE_SETTINGS);
+            const [adminPassword, setAdminPassword] = useState('888888');
+            const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem('auto_login_admin') === 'true');
+            const [view, setView] = useState(localStorage.getItem('auto_login_admin') === 'true' ? 'admin' : 'home');
+            
+            const [fbInstance, setFbInstance] = useState(null);
+            const [firebaseUser, setFirebaseUser] = useState(null);
+            const [isOfflineMode, setIsOfflineMode] = useState(false);
+            
+            const [adminTab, setAdminTab] = useState('active');
+            const [toast, setToast] = useState(null);
+            
+            // Modals
+            const [activeModal, setActiveModal] = useState(null);
+            const closeModal = () => setActiveModal(null);
+
+            // Form Data
+            const [formName, setFormName] = useState('');
+            const [formPhone, setFormPhone] = useState('');
+            const [formLast5, setFormLast5] = useState('');
+            const [formPickupMethod, setFormPickupMethod] = useState('delivery');
+            const [cart, setCart] = useState({});
+            
+            // Date Picker States
+            const today = new Date();
+            const [pickupYear, setPickupYear] = useState(today.getFullYear());
+            const [pickupMonth, setPickupMonth] = useState(today.getMonth() + 1);
+            const [pickupDay, setPickupDay] = useState(today.getDate());
+
+            // Edit/Temp States
+            const [currentEditingOrder, setCurrentEditingOrder] = useState(null);
+            const [editingProducts, setEditingProducts] = useState([]);
+            const [editingSiteSettings, setEditingSiteSettings] = useState(DEFAULT_SITE_SETTINGS);
+            const [loginInput, setLoginInput] = useState('');
+            const [newPassword, setNewPassword] = useState('');
+            const [importText, setImportText] = useState('');
+            const [aiAnalysis, setAiAnalysis] = useState('');
+            const [isLoadingAI, setIsLoadingAI] = useState(false);
+            
+            // QR Code Ref
+            const qrRef = useRef(null);
+
+            const showToast = (message, type = 'success') => setToast({ message, type });
+
+            // Date Logic
+            const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
+            useEffect(() => { const max = getDaysInMonth(pickupYear, pickupMonth); if (pickupDay > max) setPickupDay(max); }, [pickupYear, pickupMonth]);
+            const daysInCurrentMonth = useMemo(() => getDaysInMonth(pickupYear, pickupMonth), [pickupYear, pickupMonth]);
+
+            // QR Code Effect
+            useEffect(() => {
+                if (activeModal === 'connect' && qrRef.current && window.QRCode) {
+                    qrRef.current.innerHTML = ''; // Clear previous
+                    if (window.location.protocol !== 'file:') {
+                        try {
+                            new QRCode(qrRef.current, {
+                                text: window.location.href.split('#')[0],
+                                width: 128,
+                                height: 128,
+                                colorDark: "#000000",
+                                colorLight: "#ffffff",
+                                correctLevel: QRCode.CorrectLevel.H
+                            });
+                        } catch(e) {
+                            console.error("QR Code Error", e);
+                        }
+                    }
+                }
+            }, [activeModal]);
+
+            // --- Initialization Logic ---
+            useEffect(() => {
+                const savedOrders = localStorage.getItem('frozen_orders'); if (savedOrders) setOrders(JSON.parse(savedOrders));
+                const savedProducts = localStorage.getItem('frozen_products'); if (savedProducts) setProducts(JSON.parse(savedProducts));
+                const savedSettings = localStorage.getItem('frozen_site_settings'); if (savedSettings) setSiteSettings(JSON.parse(savedSettings));
+                const savedPwd = localStorage.getItem('frozen_admin_pwd'); if (savedPwd) setAdminPassword(savedPwd);
+
+                if (localStorage.getItem('auto_login_admin') === 'true') {
+                    showToast('歡迎回來，雲端已連線');
+                    localStorage.removeItem('auto_login_admin');
+                }
+
+                if (!window.firebaseModules) { setIsOfflineMode(true); return; }
+
+                const modules = window.firebaseModules;
+                
+                let configToUse = USER_FIREBASE_CONFIG;
+                let appIdToUse = USER_APP_ID;
+
+                if (modules && configToUse) {
+                    try {
+                        let app;
+                        try { app = modules.initializeApp(configToUse); } catch (e) { /* Ignore if already exists */ }
+                        
+                        const auth = modules.getAuth();
+                        const db = modules.getFirestore();
+                        
+                        setFbInstance({ app, auth, db, appId: appIdToUse, modules });
+
+                        const initAuth = async () => {
+                            try {
+                                await modules.signInAnonymously(auth);
+                            } catch (e) { 
+                                console.error("Auth Fail", e); 
+                                setIsOfflineMode(true); 
+                                showToast("雲端連線失敗，請檢查 Firebase 設定", "error");
+                            }
+                        };
+                        initAuth();
+                        modules.onAuthStateChanged(auth, (user) => setFirebaseUser(user));
+                    } catch (e) { console.error("FB Init Failed", e); }
+                }
+            }, []);
+
+            // --- Firebase Sync ---
+            useEffect(() => {
+                if (!firebaseUser || !fbInstance) return;
+                const { db, appId, modules } = fbInstance;
+                
+                const qOrders = modules.query(modules.collection(db, 'artifacts', appId, 'public', 'data', 'orders'));
+                const unsubOrders = modules.onSnapshot(qOrders, (snap) => {
+                    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setOrders(data); localStorage.setItem('frozen_orders', JSON.stringify(data));
+                });
+                const docProd = modules.doc(db, 'artifacts', appId, 'public', 'data', 'config', 'products');
+                const unsubProd = modules.onSnapshot(docProd, (snap) => {
+                    if (snap.exists() && snap.data().list) { setProducts(snap.data().list); localStorage.setItem('frozen_products', JSON.stringify(snap.data().list)); }
+                    else if (!snap.exists()) modules.setDoc(docProd, { list: DEFAULT_PRODUCTS });
+                });
+                const docSet = modules.doc(db, 'artifacts', appId, 'public', 'data', 'config', 'siteSettings');
+                const unsubSet = modules.onSnapshot(docSet, (snap) => {
+                    if (snap.exists()) { setSiteSettings({ ...DEFAULT_SITE_SETTINGS, ...snap.data() }); localStorage.setItem('frozen_site_settings', JSON.stringify(snap.data())); }
+                    else modules.setDoc(docSet, DEFAULT_SITE_SETTINGS);
+                });
+                return () => { unsubOrders(); unsubProd(); unsubSet(); };
+            }, [firebaseUser, fbInstance]);
+
+            useEffect(() => { setCart(products.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {})); }, [products]);
+
+            // --- Handlers ---
+            const calculateTotal = (cartItems) => products.reduce((total, p) => total + (cartItems[p.id] || 0) * p.price, 0);
+            const formatCurrency = (num) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(num);
+
+            const handleSubmitOrder = async (e) => {
+                e.preventDefault();
+                const totalItems = Object.values(cart).reduce((a, b) => a + b, 0);
+                if (totalItems === 0) return showToast('購物車是空的', 'error');
+
+                const formattedDate = `${pickupYear}-${String(pickupMonth).padStart(2, '0')}-${String(pickupDay).padStart(2, '0')}`;
+                const newOrder = {
+                    customerName: formName, phone: formPhone, last5: formLast5,
+                    pickupMethod: formPickupMethod, pickupTime: formattedDate,
+                    source: 'web', items: { ...cart }, total: calculateTotal(cart),
+                    notes: '', status: 'unpaid',
+                    createdAt: new Date().toLocaleString('zh-TW', { hour12: false }).replace(/\//g, '-').slice(0, 16).replace(' ', ' ')
+                };
+
+                if (firebaseUser && fbInstance) {
+                    try {
+                        const { db, appId, modules } = fbInstance;
+                        await modules.addDoc(modules.collection(db, 'artifacts', appId, 'public', 'data', 'orders'), newOrder);
+                        showToast('訂購成功！(已同步雲端)');
+                    } catch (e) {
+                        console.error(e);
+                        const localOrders = [ { ...newOrder, id: Date.now().toString() }, ...orders ];
+                        setOrders(localOrders); localStorage.setItem('frozen_orders', JSON.stringify(localOrders));
+                        showToast('網路不穩，訂單已暫存於本機', 'warning');
+                    }
+                } else {
+                    const localOrders = [ { ...newOrder, id: Date.now().toString() }, ...orders ];
+                    setOrders(localOrders); localStorage.setItem('frozen_orders', JSON.stringify(localOrders));
+                    showToast('訂單已儲存 (單機模式)', 'success');
+                }
+                
+                setFormName(''); setFormPhone(''); setFormLast5(''); setFormPickupMethod('delivery');
+                setCart(products.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {}));
+            };
+
+            const handleLogin = (e) => { e.preventDefault(); if (loginInput === adminPassword) { setIsLoggedIn(true); setView('admin'); setLoginInput(''); showToast('登入成功'); } else { showToast('密碼錯誤', 'error'); } };
+            const deleteOrder = async (id) => {
+                if(!confirm('確定刪除？')) return;
+                if (firebaseUser && fbInstance) { try { await fbInstance.modules.deleteDoc(fbInstance.modules.doc(fbInstance.db, 'artifacts', fbInstance.appId, 'public', 'data', 'orders', id)); showToast('已刪除'); } catch(e) { showToast('刪除失敗', 'error'); } } 
+                else { const n = orders.filter(o => o.id !== id); setOrders(n); localStorage.setItem('frozen_orders', JSON.stringify(n)); showToast('已刪除 (單機)'); }
+            };
+            const updateOrderStatus = async (id, status) => {
+                if (firebaseUser && fbInstance) { await fbInstance.modules.updateDoc(fbInstance.modules.doc(fbInstance.db, 'artifacts', fbInstance.appId, 'public', 'data', 'orders', id), { status }); } 
+                else { const n = orders.map(o => o.id === id ? { ...o, status } : o); setOrders(n); localStorage.setItem('frozen_orders', JSON.stringify(n)); }
+            };
+            
+            const getShareLink = () => {
+                // If local file, show warning alert and return
+                if (window.location.protocol === 'file:') {
+                    return; // The UI already shows the warning, clicking button does nothing or we can alert
+                }
+                const url = window.location.href.split('#')[0];
+                const textArea = document.createElement("textarea"); textArea.value = url; textArea.style.position = "fixed"; textArea.style.left = "-9999px"; textArea.style.top = "0"; document.body.appendChild(textArea); textArea.focus(); textArea.select();
+                try { const successful = document.execCommand('copy'); if(successful) showToast('網址已複製！'); else prompt("請手動複製網址:", url); } catch (err) { prompt("請手動複製網址:", url); } document.body.removeChild(textArea);
+            };
+
+            const handleExportExcel = () => {
+                const headers = ['訂單編號', '下單日期', '訂購人姓名', '電話', '匯款末五碼', '取貨方式', '預計取貨日', '商品內容', '總金額', '狀態', '備註'];
+                const rows = orders.map(order => {
+                    const productDetails = Object.entries(order.items).filter(([_, qty]) => qty > 0).map(([pid, qty]) => { const p = products.find(prod => prod.id === pid); return p ? `${p.name}x${qty}` : ''; }).join('; ');
+                    const statusMap = { 'unpaid': '未付款', 'checking': '款項未確認', 'pending': '待出貨', 'shipped': '已出貨' };
+                    const escape = (str) => `"${(str || '').toString().replace(/"/g, '""')}"`;
+                    return [escape(order.id), escape(order.createdAt), escape(order.customerName), escape(order.phone), escape(order.last5), escape(order.pickupMethod === 'delivery' ? '冷凍宅配' : '店面自取'), escape(order.pickupTime), escape(productDetails), escape(order.total), escape(statusMap[order.status] || order.status), escape(order.notes)].join(',');
+                });
+                const csvContent = [headers.join(','), ...rows].join('\n');
+                const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a'); link.href = url; link.setAttribute('download', `訂單匯出_${new Date().toISOString().slice(0,10)}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            };
+
+            const openEditOrderModal = (order = null) => { if (order) { setCurrentEditingOrder({ ...order, isNew: false }); } else { const d = new Date(); const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; setCurrentEditingOrder({ customerName: '', phone: '', last5: '', pickupMethod: 'delivery', pickupTime: dateStr, source: 'walkin', items: products.reduce((acc, p) => ({ ...acc, [p.id]: 0 }), {}), total: 0, notes: '', status: 'unpaid', createdAt: new Date().toLocaleString('zh-TW', { hour12: false }).replace(/\//g, '-').slice(0, 16), isNew: true }); } setActiveModal('edit_order'); };
+            const handleSaveOrder = async (e) => { e.preventDefault(); const orderData = currentEditingOrder; if (!firebaseUser || !fbInstance) { let newOrders = [...orders]; if (orderData.isNew) { const { isNew, ...finalOrder } = orderData; finalOrder.id = Date.now().toString(); newOrders = [finalOrder, ...newOrders]; } else { newOrders = orders.map(o => o.id === orderData.id ? orderData : o); } setOrders(newOrders); localStorage.setItem('frozen_orders', JSON.stringify(newOrders)); showToast('已儲存 (單機模式)'); closeModal(); return; } try { const { db, appId, modules } = fbInstance; if (orderData.isNew) { const { isNew, id, ...finalOrder } = orderData; await modules.addDoc(modules.collection(db, 'artifacts', appId, 'public', 'data', 'orders'), finalOrder); } else { const { isNew, id, ...updateData } = orderData; await modules.updateDoc(modules.doc(db, 'artifacts', appId, 'public', 'data', 'orders', id), updateData); } showToast('訂單已儲存'); closeModal(); } catch (e) { showToast('儲存失敗', 'error'); } };
+            const handleSaveProducts = async () => { if (!firebaseUser || !fbInstance) { setProducts(editingProducts); localStorage.setItem('frozen_products', JSON.stringify(editingProducts)); closeModal(); showToast('商品已更新 (單機模式)'); return; } try { const { db, appId, modules } = fbInstance; await modules.setDoc(modules.doc(db, 'artifacts', appId, 'public', 'data', 'config', 'products'), { list: editingProducts }); closeModal(); showToast('商品設定已更新'); } catch (e) { showToast('更新失敗', 'error'); } };
+            const handleAddProduct = () => setEditingProducts([...editingProducts, { id: `p${Date.now()}`, name: '新商品', price: 0, unit: '份' }]);
+            const handleRemoveProduct = (index) => { if (confirm('確定刪除？')) { const n = [...editingProducts]; n.splice(index, 1); setEditingProducts(n); } };
+            const handleMoveProduct = (index, direction) => { if (direction === 'up' && index > 0) { const n = [...editingProducts]; [n[index-1], n[index]] = [n[index], n[index-1]]; setEditingProducts(n); } else if (direction === 'down' && index < editingProducts.length - 1) { const n = [...editingProducts]; [n[index+1], n[index]] = [n[index], n[index+1]]; setEditingProducts(n); } };
+            const handleSaveSiteSettings = async () => { if (!firebaseUser || !fbInstance) { setSiteSettings(editingSiteSettings); localStorage.setItem('frozen_site_settings', JSON.stringify(editingSiteSettings)); closeModal(); showToast('設定已更新 (單機模式)'); return; } try { const { db, appId, modules } = fbInstance; await modules.setDoc(modules.doc(db, 'artifacts', appId, 'public', 'data', 'config', 'siteSettings'), editingSiteSettings); closeModal(); showToast('網站設定已更新'); } catch (e) { showToast('更新失敗', 'error'); } };
+            const handleChangePassword = () => { if (!newPassword) return showToast('密碼不能為空', 'error'); setAdminPassword(newPassword); localStorage.setItem('frozen_admin_pwd', newPassword); setNewPassword(''); closeModal(); showToast('密碼修改成功'); };
+            const handleImport = async () => { try { const rows = importText.trim().split('\n'); let count = 0; rows.forEach(row => { const cols = row.split(/\t|,/); if(cols.length<3)return; const items={}; items['p1']=parseInt(cols[3]||0); items['p2']=parseInt(cols[4]||0); const orderTotal = products.reduce((sum,p)=>sum+(items[p.id]||0)*p.price,0); if(orderTotal>0) { const newOrder = { customerName: cols[0].trim(), phone: cols[1].trim(), last5: cols[2].trim(), pickupMethod: 'delivery', pickupTime: '', source: 'web', notes: '匯入', items, total: orderTotal, status: 'unpaid', createdAt: new Date().toLocaleString('zh-TW', {hour12:false}).slice(0,16) }; if (firebaseUser && fbInstance) { const { db, appId, modules } = fbInstance; modules.addDoc(modules.collection(db, 'artifacts', appId, 'public', 'data', 'orders'), newOrder); } else { setOrders(prev => [{...newOrder, id:'IMP-'+Date.now()+Math.random()}, ...prev]); } count++; } }); setImportText(''); closeModal(); showToast(`匯入 ${count} 筆`); } catch(e) { showToast('匯入失敗', 'error'); } };
+            const generateAIReport = async () => { setIsLoadingAI(true); setAiAnalysis(''); const totalSales = orders.reduce((sum, o) => sum + parseInt(o.total), 0); const orderCount = orders.length; const prompt = `分析餐飲銷售：總額${totalSales}元，訂單${orderCount}筆。請給3個行銷建議。`; try { const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }); const data = await response.json(); if (data.candidates) setAiAnalysis(data.candidates[0].content.parts[0].text); else setAiAnalysis("AI 忙碌中"); } catch (error) { setAiAnalysis("連線錯誤"); } finally { setIsLoadingAI(false); } };
+
+            const groupedOrders = useMemo(() => { let filtered = orders; if (adminTab === 'active') filtered = orders.filter(o => o.status !== 'shipped'); else if (adminTab === 'settled') filtered = orders.filter(o => o.status === 'shipped'); filtered.sort((a, b) => new Date(b.createdAt.substring(0, 10)) - new Date(a.createdAt.substring(0, 10))); const groups = {}; filtered.forEach(order => { const datePart = order.createdAt.match(/(\d{4}[-/]\d{2})/); const monthKey = datePart ? datePart[0].replace('/', '-') : '其他'; if (!groups[monthKey]) groups[monthKey] = []; groups[monthKey].push(order); }); return groups; }, [orders, adminTab]);
+
+            // Render Functions
+            const renderCustomerForm = () => {
+                const theme = THEME_COLORS[siteSettings.themeColor] || THEME_COLORS.orange;
+                return (
+                    <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-md overflow-hidden fade-in">
+                        <div className={`${theme.bg} p-6 text-white ${siteSettings.align === 'center' ? 'text-center' : 'text-left'}`}>
+                            <h2 className="text-3xl font-bold mb-2">{siteSettings.title}</h2>
+                            <p className="opacity-90">{siteSettings.subtitle}</p>
+                            <div className={`mt-2 text-xs flex items-center gap-1 opacity-80 ${siteSettings.align === 'center' ? 'justify-center' : 'justify-start'}`}>
+                                {firebaseUser ? <span className="flex items-center gap-1"><Cloud size={14}/> 雲端連線中</span> : <span className="flex items-center gap-1"><CloudOff size={14}/> 離線模式</span>}
+                            </div>
+                        </div>
+                        <form onSubmit={handleSubmitOrder} className="p-6 space-y-8">
+                            <div className="space-y-4">
+                                {products.map(p => (
+                                    <div key={p.id} className="flex justify-between items-center border-b pb-4 last:border-0">
+                                        <div><div className="font-bold text-lg">{p.name}</div><div className="text-gray-500">{formatCurrency(p.price)} / {p.unit}</div></div>
+                                        <div className="flex items-center gap-3">
+                                            <button type="button" className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center" onClick={() => setCart({...cart, [p.id]: Math.max(0, (cart[p.id]||0) - 1)})}> <Minus size={16}/> </button>
+                                            <span className="w-8 text-center font-bold text-lg">{cart[p.id] || 0}</span>
+                                            <button type="button" className={`w-8 h-8 rounded-full ${theme.light} ${theme.text} flex items-center justify-center`} onClick={() => setCart({...cart, [p.id]: (cart[p.id]||0) + 1})}> <Plus size={16}/> </button>
+                                        </div>
+                                    </div>
+                                ))}
+                                <div className={`text-right text-xl font-bold ${theme.text}`}>總計：{formatCurrency(calculateTotal(cart))}</div>
+                            </div>
+                            <div className="bg-gray-50 p-6 rounded-lg grid md:grid-cols-2 gap-4">
+                                <div className="md:col-span-2"><label className="text-sm font-bold text-gray-600">姓名</label><input required className="w-full p-2 border rounded" value={formName} onChange={e => setFormName(e.target.value)} /></div>
+                                <div><label className="text-sm font-bold text-gray-600">電話</label><input required type="tel" className="w-full p-2 border rounded" value={formPhone} onChange={e => setFormPhone(e.target.value)} /></div>
+                                <div><label className="text-sm font-bold text-gray-600">匯款末五碼</label><input required className="w-full p-2 border rounded" value={formLast5} onChange={e => setFormLast5(e.target.value)} /></div>
+                                <div><label className="text-sm font-bold text-gray-600">取貨方式</label><select className="w-full p-2 border rounded" value={formPickupMethod} onChange={e => setFormPickupMethod(e.target.value)}><option value="delivery">冷凍宅配</option><option value="pickup">店面自取</option></select></div>
+                                <div className="md:col-span-2">
+                                    <label className="text-sm font-bold text-gray-600">預計取貨日期</label>
+                                    <div className="flex gap-2">
+                                        <select className="w-1/3 p-2 border rounded" value={pickupYear} onChange={e => setPickupYear(parseInt(e.target.value))}><option value={new Date().getFullYear()}>{new Date().getFullYear()}</option><option value={new Date().getFullYear()+1}>{new Date().getFullYear()+1}</option></select>
+                                        <select className="w-1/3 p-2 border rounded" value={pickupMonth} onChange={e => setPickupMonth(parseInt(e.target.value))}>{Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{m}月</option>)}</select>
+                                        <select className="w-1/3 p-2 border rounded" value={pickupDay} onChange={e => setPickupDay(parseInt(e.target.value))}>{Array.from({length:daysInCurrentMonth},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}日</option>)}</select>
+                                    </div>
+                                </div>
+                            </div>
+                            <button className={`w-full ${theme.bg} ${theme.hover} text-white font-bold py-4 rounded-lg text-xl shadow-lg transition`}>確認送出訂單</button>
+                        </form>
+                    </div>
+                );
+            };
+
+            const renderOrderTable = (orderGroup) => (
+                <div className="space-y-6">
+                    {Object.keys(orderGroup).length === 0 ? <div className="text-center p-8 text-gray-400">目前無訂單資料</div> : 
+                     Object.keys(orderGroup).sort().reverse().map(month => (
+                        <div key={month} className="bg-white border rounded-lg overflow-hidden shadow-sm">
+                            <div className="bg-gray-100 px-4 py-2 font-bold text-gray-700 border-b flex justify-between">
+                                <span>{month} 月份訂單</span>
+                                <span className="text-sm font-normal text-gray-500">
+                                    共 {orderGroup[month].length}筆 | 總額: {formatCurrency(orderGroup[month].reduce((sum, o) => sum + parseInt(o.total), 0))}
+                                </span>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left whitespace-nowrap">
+                                    <thead className="bg-gray-50 border-b">
+                                        <tr>
+                                            <th className="p-3 text-sm text-gray-600">狀態</th>
+                                            <th className="p-3 text-sm text-gray-600">日期/來源</th>
+                                            <th className="p-3 text-sm text-gray-600">客戶/取貨</th>
+                                            <th className="p-3 text-sm text-gray-600">內容/備註</th>
+                                            <th className="p-3 text-sm text-gray-600">總額</th>
+                                            <th className="p-3 text-sm text-gray-600 text-right">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {orderGroup[month].map(order => (
+                                            <tr key={order.id} className="border-b hover:bg-blue-50 transition">
+                                                <td className="p-3">
+                                                    <select value={order.status} onChange={(e) => updateOrderStatus(order.id, e.target.value)} className={`p-1 rounded text-xs font-bold border-0 cursor-pointer ${STATUS_OPTIONS.find(s => s.value === order.status)?.color}`}>
+                                                        {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                                    </select>
+                                                </td>
+                                                <td className="p-3 text-sm">
+                                                    <div className="text-gray-800">{order.createdAt.slice(5, 16)}</div>
+                                                    <span className="text-xs bg-gray-200 px-1 rounded text-gray-600">
+                                                        {SOURCE_OPTIONS.find(s => s.value === order.source)?.label || 'Web'}
+                                                    </span>
+                                                </td>
+                                                <td className="p-3">
+                                                    <div className="font-bold text-gray-800">{order.customerName}</div>
+                                                    <div className="text-xs text-gray-500">{order.phone}</div>
+                                                    <div className="flex gap-1 mt-1 flex-wrap">
+                                                        <span className={`text-xs px-1 rounded flex items-center gap-1 ${order.pickupMethod === 'pickup' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                            {order.pickupMethod === 'pickup' ? <Store size={10}/> : <MapPin size={10}/>}
+                                                            {order.pickupMethod === 'pickup' ? '自取' : '宅配'}
+                                                        </span>
+                                                        {order.pickupTime && <span className="text-xs bg-gray-100 px-1 rounded flex items-center gap-1"><Clock size={10}/> {order.pickupTime.replace('T', ' ')}</span>}
+                                                    </div>
+                                                </td>
+                                                <td className="p-3 text-sm max-w-xs whitespace-normal">
+                                                    <ul className="list-disc list-inside text-gray-600 text-xs mb-1">
+                                                        {products.map(p => order.items[p.id] > 0 && <li key={p.id}>{p.name} x {order.items[p.id]}</li>)}
+                                                    </ul>
+                                                    {order.notes && <div className="text-xs text-red-500 flex items-start gap-1"><MessageSquare size={10} className="mt-0.5"/> {order.notes}</div>}
+                                                </td>
+                                                <td className="p-3 font-bold text-gray-800">{formatCurrency(order.total)}</td>
+                                                <td className="p-3 text-right space-x-2">
+                                                    {/* Edit Button Logic Needed Here, simplified for this block */}
+                                                    <button onClick={() => openEditOrderModal(order)} className="text-blue-500 hover:text-blue-700" title="編輯"><Edit size={18}/></button>
+                                                    <button onClick={() => deleteOrder(order.id)} className="text-red-400 hover:text-red-600" title="刪除"><X size={18}/></button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+
+            // Login Screen
+            if (!isLoggedIn && view === 'login') return (
+                <div className="max-w-md mx-auto mt-20 bg-white p-8 rounded shadow-lg text-center fade-in">
+                    <h2 className="text-2xl font-bold mb-6">管理員登入</h2>
+                    <form onSubmit={handleLogin}><input type="password" className="w-full p-3 border rounded mb-4" placeholder="密碼" value={loginInput} onChange={e => setLoginInput(e.target.value)} autoFocus /><button className="w-full bg-gray-800 text-white py-3 rounded hover:bg-gray-700">登入</button></form>
+                    <button onClick={() => setView('home')} className="mt-4 text-sm text-gray-500 underline">返回首頁</button>
+                </div>
+            );
+
+            // --- Layout ---
+            return (
+                <div className="min-h-screen">
+                    {/* Toast Notification */}
+                    {toast && (
+                        <div 
+                            onClick={() => setToast(null)} 
+                            className={`fixed bottom-4 right-4 cursor-pointer ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'} text-white px-6 py-3 rounded shadow-lg z-50 fade-in flex items-center gap-2 transform transition-all hover:scale-105`}
+                        >
+                            {toast.type==='success'?<CheckCircle size={20}/>:<X size={20}/>}{toast.message}
+                        </div>
+                    )}
+                    
+                    {view === 'home' && (
+                        <>
+                            <nav className="bg-white shadow-sm p-4 sticky top-0 z-10 flex justify-between items-center max-w-7xl mx-auto">
+                                <h1 className="text-xl font-bold text-gray-800 cursor-pointer" onClick={() => setView('home')}>美味冷凍食品</h1>
+                                <button onClick={() => setView('login')} className="text-gray-500 text-sm flex items-center gap-1"><Lock size={16}/> 管理員</button>
+                            </nav>
+                            <div className="p-4 md:p-8">{renderCustomerForm()}</div>
+                        </>
+                    )}
+
+                    {view === 'admin' && (
+                        <div className="bg-white min-h-screen fade-in">
+                            <div className="bg-gray-800 text-white p-4 sticky top-0 z-20 shadow-md">
+                                <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-4">
+                                    <h2 className="text-xl font-bold flex items-center gap-2"><Package className="text-orange-400"/> 後台管理系統 {firebaseUser && <span className="text-xs bg-green-600 px-2 rounded">雲端</span>}</h2>
+                                    <div className="flex gap-2">
+                                        {/* Added Export Button Here */}
+                                        <button onClick={handleExportExcel} className="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm flex items-center gap-1"><Download size={16}/> 匯出 Excel</button>
+                                        <button onClick={() => setActiveModal('connect')} className="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm flex items-center gap-1"><Globe size={16}/> 分享商店</button>
+                                        <button onClick={() => setActiveModal('settings')} className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm flex items-center gap-1"><Settings size={16}/> 設定</button>
+                                        <button onClick={() => { setIsLoggedIn(false); setView('home'); }} className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm flex items-center gap-1"><LogOut size={16}/> 登出</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="max-w-7xl mx-auto px-4 mt-6">
+                                <div className="flex border-b border-gray-200">
+                                    <button onClick={() => setAdminTab('active')} className={`py-2 px-4 font-medium text-sm flex items-center gap-2 ${adminTab === 'active' ? 'border-b-2 border-orange-500 text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                                        <ClipboardList size={16}/> 待處理 ({orders.filter(o => o.status !== 'shipped').length})
+                                    </button>
+                                    <button onClick={() => setAdminTab('settled')} className={`py-2 px-4 font-medium text-sm flex items-center gap-2 ${adminTab === 'settled' ? 'border-b-2 border-orange-500 text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                                        <Archive size={16}/> 已結單區
+                                    </button>
+                                    <button onClick={() => setAdminTab('trends')} className={`py-2 px-4 font-medium text-sm flex items-center gap-2 ${adminTab === 'trends' ? 'border-b-2 border-orange-500 text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                                        <TrendingUp size={16}/> 趨勢分析
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="max-w-7xl mx-auto p-4">
+                                {adminTab === 'trends' ? (
+                                    <div className="space-y-6 fade-in">
+                                        <div className="grid md:grid-cols-3 gap-4">
+                                            <div className="bg-white p-6 rounded-lg shadow border border-gray-100"><h3 className="text-gray-500 text-sm mb-1">總銷售額 (本月)</h3><div className="text-2xl font-bold text-gray-800">{formatCurrency(orders.filter(o => o.createdAt.startsWith(new Date().toISOString().slice(0, 7))).reduce((sum, o) => sum + parseInt(o.total), 0))}</div></div>
+                                            <div className="bg-white p-6 rounded-lg shadow border border-gray-100"><h3 className="text-gray-500 text-sm mb-1">待出貨訂單</h3><div className="text-2xl font-bold text-blue-600">{orders.filter(o => o.status === 'pending').length}</div></div>
+                                            <div className="bg-white p-6 rounded-lg shadow border border-gray-100"><h3 className="text-gray-500 text-sm mb-1">總訂單數</h3><div className="text-2xl font-bold text-green-600">{orders.length}</div></div>
+                                        </div>
+                                        <div className="grid md:grid-cols-2 gap-6">
+                                            <div className="bg-white p-6 rounded-lg shadow"><h3 className="font-bold mb-4">銷售趨勢分析</h3><div className="h-64"><TrendChart orders={orders} /></div></div>
+                                            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-lg shadow border border-indigo-100">
+                                                <div className="flex justify-between items-center mb-4"><h3 className="font-bold flex items-center gap-2 text-indigo-800"><Sparkles className="text-indigo-600"/> AI 營運診斷</h3><button onClick={generateAIReport} disabled={isLoadingAI} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1 disabled:opacity-50">{isLoadingAI ? '分析中...' : '生成分析報告'}</button></div>
+                                                <div className="bg-white p-4 rounded h-64 overflow-y-auto border text-sm text-gray-700">{aiAnalysis ? (<div className="markdown-body" dangerouslySetInnerHTML={{ __html: marked.parse(aiAnalysis) }} />) : (<div className="h-full flex flex-col items-center justify-center text-gray-400"><TrendingUp size={48} className="mb-2 opacity-20"/><p>點擊上方按鈕，讓 AI 為您分析銷售數據</p></div>)}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    renderOrderTable(groupedOrders)
+                                )}
+                            </div>
+
+                            {/* Connection Modal (Simplified) */}
+                            {activeModal === 'connect' && (
+                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                                    <div className="bg-white rounded-lg p-6 max-w-lg w-full">
+                                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Globe className="text-blue-600"/> 分享商店</h3>
+                                        <div className="space-y-6">
+                                            <div className="bg-green-50 p-4 rounded border border-green-200 text-center">
+                                                <p className="text-green-800 font-bold mb-2">🟢 您的商店已上線</p>
+                                                {/* Logic to detect file:// vs hosted */}
+                                                {window.location.protocol === 'file:' ? (
+                                                    <div className="text-left bg-yellow-100 p-3 rounded text-yellow-800 text-sm mb-4">
+                                                        <p className="font-bold flex items-center gap-1"><AlertTriangle size={14}/> 注意：目前是「本機檔案」模式</p>
+                                                        <p className="mt-1">此網址 (file://...) 只有您的電腦打得開，無法分享給別人。</p>
+                                                        <p className="mt-2">請將此 index.html 檔案上傳到：</p>
+                                                        <ul className="list-disc pl-5 mt-1">
+                                                            <li><a href="https://app.netlify.com/drop" target="_blank" className="underline font-bold">Netlify Drop (推薦，拖拉即上線)</a></li>
+                                                            <li>Firebase Hosting</li>
+                                                            <li>GitHub Pages</li>
+                                                        </ul>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-sm text-gray-600 mb-4">請掃描下方 QR Code 或複製網址分享給顧客：</p>
+                                                        <div className="flex justify-center my-4" ref={qrRef}></div>
+                                                    </>
+                                                )}
+                                                <button onClick={getShareLink} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 flex items-center justify-center gap-2 w-full"><Link size={16}/> 複製網址</button>
+                                            </div>
+                                        </div>
+                                        <div className="mt-4 text-right"><button onClick={closeModal} className="text-gray-500">關閉</button></div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Settings Modal */}
+                            {activeModal === 'settings' && (
+                                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                                    <div className="bg-white rounded-lg p-6 max-w-sm w-full">
+                                        <h3 className="font-bold mb-4">快速設定</h3>
+                                        <button onClick={() => { setEditingProducts(JSON.parse(JSON.stringify(products))); setActiveModal('product'); }} className="w-full text-left p-3 hover:bg-gray-50 border-b flex justify-between">商品管理 <Tag size={16}/></button>
+                                        <button onClick={() => { setEditingSiteSettings({...siteSettings}); setActiveModal('site_settings'); }} className="w-full text-left p-3 hover:bg-gray-50 border-b flex justify-between">網站排版 <Palette size={16}/></button>
+                                        <button onClick={() => { setActiveModal('password'); }} className="w-full text-left p-3 hover:bg-gray-50 border-b flex justify-between">修改密碼 <Lock size={16}/></button>
+                                        <button onClick={() => { setActiveModal('import'); }} className="w-full text-left p-3 hover:bg-gray-50 border-b flex justify-between">匯入訂單 <FileSpreadsheet size={16}/></button>
+                                        <div className="mt-4 text-right"><button onClick={closeModal} className="px-4 py-2 bg-gray-200 rounded">關閉</button></div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Unified Modal Rendering Logic */}
+                    {activeModal === 'edit_order' && currentEditingOrder && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                                <h3 className="text-lg font-bold mb-4 flex items-center gap-2">{currentEditingOrder.isNew ? '新增訂單' : '編輯訂單內容'}</h3>
+                                <form onSubmit={handleSaveOrder} className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded">
+                                        <div className="col-span-2 md:col-span-1"><label className="block text-xs font-bold text-gray-500 mb-1">姓名</label><input required type="text" className="w-full p-2 border rounded" value={currentEditingOrder.customerName} onChange={e => setCurrentEditingOrder({...currentEditingOrder, customerName: e.target.value})} /></div>
+                                        <div className="col-span-2 md:col-span-1"><label className="block text-xs font-bold text-gray-500 mb-1">電話</label><input required type="text" className="w-full p-2 border rounded" value={currentEditingOrder.phone} onChange={e => setCurrentEditingOrder({...currentEditingOrder, phone: e.target.value})} /></div>
+                                        <div><label className="block text-xs font-bold text-gray-500 mb-1">訂單來源</label><select className="w-full p-2 border rounded" value={currentEditingOrder.source || 'walkin'} onChange={e => setCurrentEditingOrder({...currentEditingOrder, source: e.target.value})}>{SOURCE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}</select></div>
+                                        <div><label className="block text-xs font-bold text-gray-500 mb-1">取貨方式</label><select className="w-full p-2 border rounded" value={currentEditingOrder.pickupMethod} onChange={e => setCurrentEditingOrder({...currentEditingOrder, pickupMethod: e.target.value})}><option value="delivery">冷凍宅配</option><option value="pickup">店面自取</option></select></div>
+                                        <div className="col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1">預計取貨/宅配日期</label><input type="date" className="w-full p-2 border rounded" value={currentEditingOrder.pickupTime || ''} onChange={e => setCurrentEditingOrder({...currentEditingOrder, pickupTime: e.target.value})} /></div>
+                                        <div className="col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1">備註</label><textarea className="w-full p-2 border rounded h-20" placeholder="例如：少辣、需要收據..." value={currentEditingOrder.notes || ''} onChange={e => setCurrentEditingOrder({...currentEditingOrder, notes: e.target.value})}></textarea></div>
+                                    </div>
+                                    <div className="border-t pt-4"><h4 className="font-bold mb-2">商品內容</h4>{products.map(p => (<div key={p.id} className="flex justify-between items-center py-1"><span>{p.name} ({p.price})</span><div className="flex items-center gap-2"><button type="button" className="w-6 h-6 rounded bg-gray-200" onClick={() => {const newQty = Math.max(0, (currentEditingOrder.items[p.id] || 0) - 1); const newItems = {...currentEditingOrder.items, [p.id]: newQty}; const newTotal = products.reduce((sum, prod) => sum + (newItems[prod.id] || 0) * prod.price, 0); setCurrentEditingOrder({...currentEditingOrder, items: newItems, total: newTotal});}}>-</button><span className="w-6 text-center">{currentEditingOrder.items[p.id] || 0}</span><button type="button" className="w-6 h-6 rounded bg-gray-200" onClick={() => {const newQty = (currentEditingOrder.items[p.id] || 0) + 1; const newItems = {...currentEditingOrder.items, [p.id]: newQty}; const newTotal = products.reduce((sum, prod) => sum + (newItems[prod.id] || 0) * prod.price, 0); setCurrentEditingOrder({...currentEditingOrder, items: newItems, total: newTotal});}}>+</button></div></div>))}</div>
+                                    <div className="flex justify-between items-center bg-blue-50 p-4 rounded mt-4"><span className="font-bold text-gray-700">總金額 (可手動修改)</span><input type="number" className="w-32 p-2 border rounded text-right font-bold text-xl" value={currentEditingOrder.total} onChange={e => setCurrentEditingOrder({...currentEditingOrder, total: parseInt(e.target.value) || 0})} /></div>
+                                    <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={closeModal} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">取消</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">儲存</button></div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeModal === 'product' && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto"><h3 className="font-bold mb-4">商品管理</h3><div className="space-y-4 mb-4">{editingProducts.map((p, i) => (<div key={p.id} className="grid grid-cols-12 gap-2 items-center bg-gray-50 p-2 rounded"><div className="col-span-1 flex flex-col gap-1"><button onClick={() => handleMoveProduct(i, 'up')} disabled={i === 0} className="text-gray-400 hover:text-blue-600 disabled:opacity-30"><ArrowUp size={14}/></button><button onClick={() => handleMoveProduct(i, 'down')} disabled={i === editingProducts.length - 1} className="text-gray-400 hover:text-blue-600 disabled:opacity-30"><ArrowDown size={14}/></button></div><div className="col-span-5"><input className="border p-1 w-full rounded text-sm" value={p.name} placeholder="商品名稱" onChange={e => { const n=[...editingProducts]; n[i].name=e.target.value; setEditingProducts(n); }} /></div><div className="col-span-3"><input className="border p-1 w-full rounded text-sm" type="number" value={p.price} placeholder="價格" onChange={e => { const n=[...editingProducts]; n[i].price=parseInt(e.target.value) || 0; setEditingProducts(n); }} /></div><div className="col-span-2"><input className="border p-1 w-full rounded text-sm" value={p.unit} placeholder="單位" onChange={e => { const n=[...editingProducts]; n[i].unit=e.target.value; setEditingProducts(n); }} /></div><div className="col-span-1 text-center"><button onClick={() => handleRemoveProduct(i)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button></div></div>))}</div><button onClick={handleAddProduct} className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-blue-600 flex items-center justify-center gap-2 mb-4"><Plus size={16}/> 新增商品</button><div className="flex justify-end gap-2 border-t pt-4"><button onClick={closeModal} className="px-3 py-1 bg-gray-200 rounded text-gray-700">取消</button><button onClick={handleSaveProducts} className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">儲存變更</button></div></div></div>)}
+                    {activeModal === 'site_settings' && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-lg p-6 max-w-lg w-full"><h3 className="font-bold mb-4 flex items-center gap-2"><Palette className="text-purple-600"/> 網站前台設定</h3><div className="space-y-4"><div><label className="block text-sm font-bold text-gray-600 mb-1">網站主標題</label><input className="w-full border p-2 rounded" value={editingSiteSettings.title} onChange={e => setEditingSiteSettings({...editingSiteSettings, title: e.target.value})} /></div><div><label className="block text-sm font-bold text-gray-600 mb-1">副標題 / 標語</label><input className="w-full border p-2 rounded" value={editingSiteSettings.subtitle} onChange={e => setEditingSiteSettings({...editingSiteSettings, subtitle: e.target.value})} /></div><div><label className="block text-sm font-bold text-gray-600 mb-1">品牌主題色</label><div className="flex gap-2">{Object.keys(THEME_COLORS).map(color => (<button key={color} onClick={() => setEditingSiteSettings({...editingSiteSettings, themeColor: color})} className={`w-8 h-8 rounded-full ${THEME_COLORS[color].bg} ${editingSiteSettings.themeColor === color ? 'ring-2 ring-offset-2 ring-gray-400' : ''}`}></button>))}</div></div><div><label className="block text-sm font-bold text-gray-600 mb-1">標題對齊</label><div className="flex gap-4"><label className="flex items-center gap-1"><input type="radio" name="align" value="center" checked={editingSiteSettings.align === 'center'} onChange={e => setEditingSiteSettings({...editingSiteSettings, align: e.target.value})} /> 置中</label><label className="flex items-center gap-1"><input type="radio" name="align" value="left" checked={editingSiteSettings.align === 'left'} onChange={e => setEditingSiteSettings({...editingSiteSettings, align: e.target.value})} /> 靠左</label></div></div></div><div className="flex justify-end gap-2 mt-6 border-t pt-4"><button onClick={closeModal} className="px-3 py-1 bg-gray-200 rounded">取消</button><button onClick={handleSaveSiteSettings} className="px-3 py-1 bg-purple-600 text-white rounded">儲存變更</button></div></div></div>)}
+                    {activeModal === 'import' && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-lg p-6 max-w-lg w-full"><h3 className="font-bold mb-2">匯入訂單</h3><textarea className="w-full h-32 border p-2" value={importText} onChange={e => setImportText(e.target.value)}></textarea><div className="flex justify-end gap-2 mt-2"><button onClick={closeModal} className="px-3 py-1 bg-gray-200 rounded">取消</button><button onClick={handleImport} className="px-3 py-1 bg-green-600 text-white rounded">匯入</button></div></div></div>)}
+                    {activeModal === 'password' && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-lg p-6 max-w-sm w-full"><h3 className="text-lg font-bold mb-4">更改後台密碼</h3><input type="text" className="w-full p-2 border rounded mb-4" placeholder="輸入新密碼" value={newPassword} onChange={e => setNewPassword(e.target.value)} /><div className="flex justify-end gap-2"><button onClick={closeModal} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">取消</button><button onClick={handleChangePassword} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">更改</button></div></div></div>)}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
